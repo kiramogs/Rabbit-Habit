@@ -28,7 +28,6 @@ import {
   setMoodAction,
   signInWithGoogleAction,
   signOutAction,
-  startGuestSessionAction,
   subscribeToHabitRabbitState,
   toggleUserItemVisibilityAction,
 } from "@/lib/firebase-actions";
@@ -592,12 +591,6 @@ export function HabitRabbitApp({ state }: HabitRabbitAppProps) {
     });
   };
 
-  const handleStartGuestSession = () => {
-    runAuthOperation(() => startGuestSessionAction(), () => {
-      setFlash("Guest session started.");
-    });
-  };
-
   const handleSignOut = () => {
     runAuthOperation(() => signOutAction(), () => {
       setFlash("Signed out.");
@@ -611,7 +604,6 @@ export function HabitRabbitApp({ state }: HabitRabbitAppProps) {
         isAuthPending={isAuthPending}
         flash={flash}
         onGoogleSignIn={handleGoogleSignIn}
-        onContinueAsGuest={handleStartGuestSession}
       />
     );
   }
@@ -754,48 +746,26 @@ function AuthLandingScreen({
   isAuthPending,
   flash,
   onGoogleSignIn,
-  onContinueAsGuest,
 }: {
   isLoading: boolean;
   isAuthPending: boolean;
   flash: string | null;
   onGoogleSignIn: () => void;
-  onContinueAsGuest: () => void;
 }) {
   return (
     <main className="auth-page">
       <section className="auth-shell">
-        <div className="auth-hero">
-          <span className="brand-pill">Habit Rabbit</span>
-          <h1>Build habits in a live, synced companion app.</h1>
-          <p>
-            Track habits, moods, stats, and room progress with Firebase-backed storage and a
-            persistent session.
-          </p>
-          <div className="auth-feature-grid">
-            <article className="auth-feature-card">
-              <strong>Realtime sync</strong>
-              <span>Your habits and moods stay consistent across refreshes.</span>
-            </article>
-            <article className="auth-feature-card">
-              <strong>Private storage</strong>
-              <span>Each signed-in user reads and writes only their own document.</span>
-            </article>
-            <article className="auth-feature-card">
-              <strong>Fast UI</strong>
-              <span>Optimistic updates keep the app responsive while Firestore catches up.</span>
-            </article>
-          </div>
-        </div>
-
         <div className="auth-card">
+          <Image
+            src="/assets/hrbunny.png"
+            alt="Habit Rabbit"
+            width={72}
+            height={72}
+            className="auth-logo"
+          />
           <div className="auth-card-copy">
-            <h2>{isLoading ? "Restoring your session" : "Start a session"}</h2>
-            <p>
-              {isLoading
-                ? "Checking Firebase Auth and your saved sign-in state."
-                : "Sign in with Google for persistent cloud-backed storage, or continue as a guest on this device."}
-            </p>
+            <span className="brand-pill">Habit Rabbit</span>
+            <h1 className="auth-title">Sign in</h1>
           </div>
 
           <div className="auth-actions">
@@ -805,25 +775,16 @@ function AuthLandingScreen({
               onClick={onGoogleSignIn}
               disabled={isLoading || isAuthPending}
             >
-              {isAuthPending ? "Connecting..." : "Continue with Google"}
+              {isLoading ? "Restoring session..." : isAuthPending ? "Connecting..." : "Continue with Google"}
             </button>
-            <button
-              type="button"
-              className="secondary-btn auth-cta"
-              onClick={onContinueAsGuest}
-              disabled={isLoading || isAuthPending}
-            >
-              {isAuthPending ? "Starting..." : "Continue as Guest"}
-            </button>
-          </div>
-
-          <div className="auth-note">
-            Guest mode uses anonymous Firebase Auth. Upgrade to Google later from the profile screen
-            without losing local progress.
           </div>
 
           {flash ? <p className="flash-text">{flash}</p> : null}
-          {isAuthPending ? <p className="health-tip">Updating session...</p> : null}
+          {!flash ? (
+            <p className="health-tip auth-status">
+              {isLoading ? "Checking your saved sign-in state." : "Use your Google account to continue."}
+            </p>
+          ) : null}
         </div>
       </section>
     </main>
