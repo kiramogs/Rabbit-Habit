@@ -1,0 +1,19 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function isSignedInOwner(userId) {
+      return request.auth != null && request.auth.uid == userId;
+    }
+
+    function writesValidOwnership(userId) {
+      return request.resource.data.ownerUid == userId
+        && request.resource.data.schemaVersion == 1;
+    }
+
+    match /users/{userId}/apps/habit-rabbit {
+      allow read: if isSignedInOwner(userId);
+      allow create, update: if isSignedInOwner(userId) && writesValidOwnership(userId);
+      allow delete: if isSignedInOwner(userId);
+    }
+  }
+}
