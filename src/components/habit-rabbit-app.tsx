@@ -30,8 +30,10 @@ import {
   signOutAction,
   subscribeToHabitRabbitState,
   toggleUserItemVisibilityAction,
+  updateHabitAction,
 } from "@/lib/firebase-actions";
 import type { HabitRabbitState, HabitState } from "@/lib/data";
+import { validateHabitChange } from "@/lib/habit-validation";
 import {
   APP_MODE_COPY,
   APP_TABS,
@@ -114,24 +116,6 @@ function countHabitWeekCompletions(
   ).length;
 }
 
-function validateNewHabit(habits: HabitState[], priority: HabitPriority, targetPerWeek: number) {
-  if (targetPerWeek < 1 || targetPerWeek > 7) {
-    return "Weekly goal must be between 1 and 7.";
-  }
-  if (habits.length >= 20) {
-    return "You can add up to 20 habits total.";
-  }
-  const highCount = habits.filter((habit) => habit.priority === HabitPriority.HIGH).length;
-  const mediumCount = habits.filter((habit) => habit.priority === HabitPriority.MEDIUM).length;
-  if (priority === HabitPriority.HIGH && highCount >= 1) {
-    return "Only one high-priority habit is allowed.";
-  }
-  if (priority === HabitPriority.MEDIUM && mediumCount >= 2) {
-    return "Only two medium-priority habits are allowed.";
-  }
-  return null;
-}
-
 export function HabitRabbitApp({ state }: HabitRabbitAppProps) {
   const [isPending, startTransition] = useTransition();
   const [isAuthPending, startAuthTransition] = useTransition();
@@ -146,6 +130,7 @@ export function HabitRabbitApp({ state }: HabitRabbitAppProps) {
   const [habitDescription, setHabitDescription] = useState("");
   const [habitTarget, setHabitTarget] = useState(3);
   const [habitPriority, setHabitPriority] = useState<HabitPriority>(HabitPriority.LOW);
+  const [editingHabitId, setEditingHabitId] = useState<string | null>(null);
   const [authState, setAuthState] = useState<AuthViewState>({
     status: "loading",
     uid: null,
@@ -156,6 +141,22 @@ export function HabitRabbitApp({ state }: HabitRabbitAppProps) {
   });
 
   const liveStateRef = useRef(liveState);
+
+  const resetHabitForm = () => {
+    setEditingHabitId(null);
+    setHabitName("");
+    setHabitDescription("");
+    setHabitTarget(3);
+    setHabitPriority(HabitPriority.LOW);
+  };
+
+  const populateHabitForm = (habit: HabitState) => {
+    setEditingHabitId(habit.id);
+    setHabitName(habit.name);
+    setHabitDescription(habit.description ?? "");
+    setHabitTarget(habit.targetPerWeek);
+    setHabitPriority(habit.priority);
+  };
 
   useEffect(() => {
     setLiveState(cloneState(state));
@@ -175,6 +176,11 @@ export function HabitRabbitApp({ state }: HabitRabbitAppProps) {
           setLiveState(cloneState(state));
           setTab("home");
           setSelectedMoodDay(null);
+          setEditingHabitId(null);
+          setHabitName("");
+          setHabitDescription("");
+          setHabitTarget(3);
+          setHabitPriority(HabitPriority.LOW);
         }
       }
     );
@@ -185,6 +191,21 @@ export function HabitRabbitApp({ state }: HabitRabbitAppProps) {
   useEffect(() => {
     liveStateRef.current = liveState;
   }, [liveState]);
+
+  useEffect(() => {
+    if (!editingHabitId) {
+      return;
+    }
+
+    const stillExists = liveState.habits.some((habit) => habit.id === editingHabitId);
+    if (!stillExists) {
+      setEditingHabitId(null);
+      setHabitName("");
+      setHabitDescription("");
+      setHabitTarget(3);
+      setHabitPriority(HabitPriority.LOW);
+    }
+  }, [editingHabitId, liveState.habits]);
 
   const completionSet = useMemo(() => {
     return new Set(liveState.completions.map((completion) => completionKey(completion.habitId, completion.day)));
@@ -403,17 +424,107 @@ export function HabitRabbitApp({ state }: HabitRabbitAppProps) {
     );
   };
 
-  const submitNewHabit = (event: React.FormEvent<HTMLFormElement>) => {
+  const handleStartEditHabit = (habitId: string) => {
+    const habit = liveStateRef.current.habits.find((entry) => entry.id === habitId);
+    if (!habit) {
+      setFlash("Habit not found.");
+      return;
+    }
+
+    populateHabitForm(habit);
+  };
+
+  const handleCancelHabitEdit = () => {
+    resetHabitForm();
+  };
+
+  const submitHabitForm = (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     const trimmedName = habitName.trim();
+    const trimmedDescription = habitDescription.trim();
+    const currentEditingHabitId = editingHabitId;
+
     if (!trimmedName) {
       setFlash("Habit name is required.");
       return;
     }
 
-    const validationError = validateNewHabit(liveStateRef.current.habits, habitPriority, habitTarget);
+    const validationError = validateHabitChange({
+      habits: liveStateRef.current.habits,
+      priority: habitPriority,
+      targetPerWeek: habitTarget,
+      habitId: currentEditingHabitId ?? undefined,
+    });
+
     if (validationError) {
       setFlash(validationError);
+      return;
+    }
+
+    if (currentEditingHabitId) {
+      const previousHabit = liveStateRef.current.habits.find(
+        (habit) => habit.id === currentEditingHabitId
+      );
+
+      if (!previousHabit) {
+        setFlash("Habit not found.");
+        return;
+      }
+
+      const updatedHabit: HabitState = {
+        ...previousHabit,
+        name: trimmedName,
+        description: trimmedDescription || null,
+        targetPerWeek: habitTarget,
+        priority: habitPriority,
+        colorHex: colorForPriority(habitPriority),
+      };
+
+      setLiveState((prev) => ({
+        ...prev,
+        habits: sortHabits(
+          prev.habits.map((habit) =>
+            habit.id === currentEditingHabitId ? updatedHabit : habit
+          )
+        ),
+      }));
+      resetHabitForm();
+
+      runServer(
+        () =>
+          updateHabitAction({
+            habitId: currentEditingHabitId,
+            name: trimmedName,
+            description: trimmedDescription,
+            targetPerWeek: habitTarget,
+            priority: habitPriority,
+          }),
+        (result) => {
+          const syncedHabit = (result.habit as HabitState | undefined) ?? null;
+          if (!syncedHabit) return;
+
+          setLiveState((prev) => ({
+            ...prev,
+            habits: sortHabits(
+              prev.habits.map((habit) =>
+                habit.id === currentEditingHabitId ? syncedHabit : habit
+              )
+            ),
+          }));
+        },
+        () => {
+          setLiveState((prev) => ({
+            ...prev,
+            habits: sortHabits(
+              prev.habits.map((habit) =>
+                habit.id === currentEditingHabitId ? previousHabit : habit
+              )
+            ),
+          }));
+          populateHabitForm(previousHabit);
+        }
+      );
+
       return;
     }
 
@@ -422,7 +533,7 @@ export function HabitRabbitApp({ state }: HabitRabbitAppProps) {
     const tempHabit: HabitState = {
       id: tempId,
       name: trimmedName,
-      description: habitDescription.trim() || null,
+      description: trimmedDescription || null,
       targetPerWeek: habitTarget,
       priority: habitPriority,
       sortOrder: maxSort + 1,
@@ -435,10 +546,7 @@ export function HabitRabbitApp({ state }: HabitRabbitAppProps) {
       ...prev,
       habits: sortHabits([...prev.habits, tempHabit]),
     }));
-    setHabitName("");
-    setHabitDescription("");
-    setHabitTarget(3);
-    setHabitPriority(HabitPriority.LOW);
+    resetHabitForm();
 
     runServer(
       () =>
@@ -472,6 +580,11 @@ export function HabitRabbitApp({ state }: HabitRabbitAppProps) {
     const removedHabit = snapshot.habits.find((habit) => habit.id === habitId);
     if (!removedHabit) return;
     const removedCompletions = snapshot.completions.filter((completion) => completion.habitId === habitId);
+    const wasEditingDeletedHabit = editingHabitId === habitId;
+
+    if (wasEditingDeletedHabit) {
+      resetHabitForm();
+    }
 
     setLiveState((prev) => ({
       ...prev,
@@ -488,6 +601,9 @@ export function HabitRabbitApp({ state }: HabitRabbitAppProps) {
           habits: sortHabits([...prev.habits, removedHabit]),
           completions: [...prev.completions, ...removedCompletions],
         }));
+        if (wasEditingDeletedHabit) {
+          populateHabitForm(removedHabit);
+        }
       }
     );
   };
@@ -673,8 +789,10 @@ export function HabitRabbitApp({ state }: HabitRabbitAppProps) {
                 )
               }
               onComplete={handleCompleteHabit}
+              onEditHabit={handleStartEditHabit}
               onDeleteHabit={handleDeleteHabit}
-              onAddHabit={submitNewHabit}
+              onSubmitHabit={submitHabitForm}
+              onCancelHabitEdit={handleCancelHabitEdit}
               habitName={habitName}
               setHabitName={setHabitName}
               habitDescription={habitDescription}
@@ -683,6 +801,7 @@ export function HabitRabbitApp({ state }: HabitRabbitAppProps) {
               setHabitTarget={setHabitTarget}
               habitPriority={habitPriority}
               setHabitPriority={setHabitPriority}
+              editingHabitId={editingHabitId}
             />
           )}
           {tab === "stats" && (
@@ -1010,8 +1129,10 @@ function HabitScreen({
   onPrevWeek,
   onNextWeek,
   onComplete,
+  onEditHabit,
   onDeleteHabit,
-  onAddHabit,
+  onSubmitHabit,
+  onCancelHabitEdit,
   habitName,
   setHabitName,
   habitDescription,
@@ -1020,6 +1141,7 @@ function HabitScreen({
   setHabitTarget,
   habitPriority,
   setHabitPriority,
+  editingHabitId,
 }: {
   state: HabitRabbitState;
   weekDays: Date[];
@@ -1030,8 +1152,10 @@ function HabitScreen({
   onPrevWeek: () => void;
   onNextWeek: () => void;
   onComplete: (habitId: string, day: string) => void;
+  onEditHabit: (habitId: string) => void;
   onDeleteHabit: (habitId: string) => void;
-  onAddHabit: (event: React.FormEvent<HTMLFormElement>) => void;
+  onSubmitHabit: (event: React.FormEvent<HTMLFormElement>) => void;
+  onCancelHabitEdit: () => void;
   habitName: string;
   setHabitName: (value: string) => void;
   habitDescription: string;
@@ -1040,8 +1164,10 @@ function HabitScreen({
   setHabitTarget: (value: number) => void;
   habitPriority: HabitPriority;
   setHabitPriority: (value: HabitPriority) => void;
+  editingHabitId: string | null;
 }) {
   const weekLabel = format(weekDays[0], "MMMM yyyy");
+  const isEditing = Boolean(editingHabitId);
 
   return (
     <div className="habit-screen">
@@ -1085,7 +1211,7 @@ function HabitScreen({
           }, 0);
 
           return (
-            <div key={habit.id} className="habit-row">
+            <div key={habit.id} className={clsx("habit-row", editingHabitId === habit.id && "editing")}>
               <div className="habit-title">
                 <Image
                   src={PRIORITY_META[habit.priority].dot}
@@ -1093,16 +1219,29 @@ function HabitScreen({
                   width={14}
                   height={14}
                 />
-                <span>{habit.name}</span>
+                <div className="habit-copy">
+                  <span>{habit.name}</span>
+                  {habit.description ? <small>{habit.description}</small> : null}
+                </div>
                 <strong>{weekDone}/{habit.targetPerWeek}</strong>
-                <button
-                  type="button"
-                  className="habit-delete-btn"
-                  onClick={() => onDeleteHabit(habit.id)}
-                  aria-label={`Delete ${habit.name}`}
-                >
-                  Delete
-                </button>
+                <div className="habit-actions">
+                  <button
+                    type="button"
+                    className="habit-edit-btn"
+                    onClick={() => onEditHabit(habit.id)}
+                    aria-label={`Edit ${habit.name}`}
+                  >
+                    Edit
+                  </button>
+                  <button
+                    type="button"
+                    className="habit-delete-btn"
+                    onClick={() => onDeleteHabit(habit.id)}
+                    aria-label={`Delete ${habit.name}`}
+                  >
+                    Delete
+                  </button>
+                </div>
               </div>
               <div className="habit-dots">
                 {weekDays.map((date) => {
@@ -1133,8 +1272,8 @@ function HabitScreen({
         })}
       </div>
 
-      <form className="habit-form" onSubmit={onAddHabit}>
-        <div className="form-title">Add Habit</div>
+      <form className="habit-form" onSubmit={onSubmitHabit}>
+        <div className="form-title">{isEditing ? "Edit Habit" : "Add Habit"}</div>
         <input
           type="text"
           value={habitName}
@@ -1175,9 +1314,16 @@ function HabitScreen({
             </select>
           </label>
         </div>
-        <button type="submit" className="primary-btn">
-          Add Habit
-        </button>
+        <div className="form-actions">
+          <button type="submit" className="primary-btn">
+            {isEditing ? "Save Habit" : "Add Habit"}
+          </button>
+          {isEditing ? (
+            <button type="button" className="secondary-btn" onClick={onCancelHabitEdit}>
+              Cancel
+            </button>
+          ) : null}
+        </div>
       </form>
     </div>
   );

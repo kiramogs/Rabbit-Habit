@@ -680,12 +680,33 @@ select {
   background: #fff;
 }
 
+.habit-row.editing {
+  border-color: #ef8f7b;
+  box-shadow: 0 0 0 2px rgba(249, 196, 184, 0.7) inset;
+}
+
 .habit-title {
   display: grid;
   grid-template-columns: 16px 1fr auto auto;
   align-items: center;
   gap: 6px;
   font-size: 0.94rem;
+}
+
+.habit-copy {
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+}
+
+.habit-copy span {
+  overflow-wrap: anywhere;
+}
+
+.habit-copy small {
+  color: #6c5854;
+  font-size: 0.72rem;
+  line-height: 1.2;
 }
 
 .habit-title strong {
@@ -696,15 +717,31 @@ select {
   font-size: 0.78rem;
 }
 
+.habit-actions {
+  display: inline-flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 6px;
+}
+
+.habit-edit-btn,
 .habit-delete-btn {
   border: 2px solid #6a5854;
   border-radius: 999px;
-  background: #ffd9cc;
-  color: #5c3933;
   padding: 3px 8px;
   font-size: 0.7rem;
   cursor: pointer;
   font-weight: 700;
+}
+
+.habit-edit-btn {
+  background: #fff1df;
+  color: #4e3c39;
+}
+
+.habit-delete-btn {
+  background: #ffd9cc;
+  color: #5c3933;
 }
 
 .habit-dots {
@@ -770,6 +807,12 @@ select {
   display: grid;
   gap: 4px;
   font-size: 0.8rem;
+}
+
+.form-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
 }
 
 .primary-btn,
@@ -1120,7 +1163,7 @@ select {
     grid-template-columns: 16px 1fr auto;
   }
 
-  .habit-delete-btn {
+  .habit-actions {
     grid-column: 2 / -1;
     justify-self: start;
   }

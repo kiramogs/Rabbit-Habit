@@ -17,6 +17,7 @@ import { z } from "zod";
 
 import { createDefaultHabitRabbitState } from "@/lib/default-state";
 import { auth, firestore } from "@/lib/firebase";
+import { validateHabitChange } from "@/lib/habit-validation";
 import {
   clamp,
   EXTRA_SCORE_AT_FULL_HEALTH,
@@ -82,11 +83,17 @@ const itemToggleInput = z.object({
   userItemId: z.string().min(1),
 });
 
-const createHabitInput = z.object({
+const habitFieldsInput = z.object({
   name: z.string().min(1).max(60),
   description: z.string().max(180).optional(),
   targetPerWeek: z.number().int().min(1).max(7),
   priority: z.enum(Object.values(HabitPriority)),
+});
+
+const createHabitInput = habitFieldsInput;
+
+const updateHabitInput = habitFieldsInput.extend({
+  habitId: z.string().min(1),
 });
 
 const deleteHabitInput = z.object({
@@ -869,19 +876,14 @@ export async function createHabitAction(rawInput: unknown) {
       const snapshot = await transaction.get(habitRabbitDocRef);
       const raw = snapshot.exists() ? snapshot.data() : undefined;
       const state = snapshot.exists() ? normalizeState(raw) : createDefaultHabitRabbitState();
+      const validationError = validateHabitChange({
+        habits: state.habits,
+        priority: input.priority,
+        targetPerWeek: input.targetPerWeek,
+      });
 
-      if (state.habits.length >= 20) {
-        throw new Error("You can add up to 20 habits total.");
-      }
-
-      const highCount = state.habits.filter((habit) => habit.priority === HabitPriority.HIGH).length;
-      const mediumCount = state.habits.filter((habit) => habit.priority === HabitPriority.MEDIUM).length;
-
-      if (input.priority === HabitPriority.HIGH && highCount >= 1) {
-        throw new Error("Only one high-priority habit is allowed.");
-      }
-      if (input.priority === HabitPriority.MEDIUM && mediumCount >= 2) {
-        throw new Error("Only two medium-priority habits are allowed.");
+      if (validationError) {
+        throw new Error(validationError);
       }
 
       const habit: HabitState = {
@@ -899,6 +901,57 @@ export async function createHabitAction(rawInput: unknown) {
       state.habits = sortHabits([...state.habits, habit]);
       transaction.set(habitRabbitDocRef, buildStoredDocument(user, state, raw));
       return { ok: true, habit };
+    });
+
+    return result;
+  } catch (error) {
+    return { ok: false, message: transactionError(error) };
+  }
+}
+
+export async function updateHabitAction(rawInput: unknown) {
+  try {
+    const input = updateHabitInput.parse(rawInput);
+    const user = await ensureAuthenticatedUser();
+    const habitRabbitDocRef = getHabitRabbitDocRef(user.uid);
+    const result = await runTransaction(firestore, async (transaction) => {
+      const snapshot = await transaction.get(habitRabbitDocRef);
+      const raw = snapshot.exists() ? snapshot.data() : undefined;
+      const state = snapshot.exists() ? normalizeState(raw) : createDefaultHabitRabbitState();
+      const existing = state.habits.find((habit) => habit.id === input.habitId);
+
+      if (!existing) {
+        throw new Error("Habit not found.");
+      }
+
+      const validationError = validateHabitChange({
+        habits: state.habits,
+        priority: input.priority,
+        targetPerWeek: input.targetPerWeek,
+        habitId: input.habitId,
+      });
+
+      if (validationError) {
+        throw new Error(validationError);
+      }
+
+      const updatedHabit: HabitState = {
+        ...existing,
+        name: input.name.trim(),
+        description: input.description?.trim() || null,
+        targetPerWeek: input.targetPerWeek,
+        priority: input.priority,
+        colorHex: colorForPriority(input.priority),
+      };
+
+      state.habits = sortHabits(
+        state.habits.map((habit) =>
+          habit.id === input.habitId ? updatedHabit : habit
+        )
+      );
+
+      transaction.set(habitRabbitDocRef, buildStoredDocument(user, state, raw));
+      return { ok: true, habit: updatedHabit };
     });
 
     return result;
