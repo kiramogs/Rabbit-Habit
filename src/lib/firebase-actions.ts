@@ -1,4 +1,4 @@
-import { endOfDay, endOfWeek, isAfter, isBefore, startOfDay, startOfWeek, subWeeks } from "date-fns";
+import { endOfDay, isAfter, isBefore, startOfDay, subWeeks } from "date-fns";
 import {
   GoogleAuthProvider,
   browserLocalPersistence,
@@ -24,7 +24,6 @@ import {
   fromIsoDay,
   LEVEL_SCORE_CAP,
   SCORE_PER_COMPLETION,
-  toIsoDay,
 } from "@/lib/habit-rabbit";
 import type { HabitRabbitState, HabitState } from "@/lib/data";
 import { AppMode, HabitPriority, MoodType, RoomType } from "@/lib/types";
@@ -450,19 +449,6 @@ async function mergeIntoUserDocument(user: User, incomingState: HabitRabbitState
   return mergedState;
 }
 
-function countHabitWeekCompletions(state: HabitRabbitState, habitId: string, day: string) {
-  const date = fromIsoDay(day);
-  const weekStart = toIsoDay(startOfWeek(date, { weekStartsOn: 0 }));
-  const weekEnd = toIsoDay(endOfWeek(date, { weekStartsOn: 0 }));
-
-  return state.completions.filter(
-    (completion) =>
-      completion.habitId === habitId &&
-      completion.day >= weekStart &&
-      completion.day <= weekEnd
-  ).length;
-}
-
 function transactionError(error: unknown) {
   const message = error instanceof Error ? error.message : "Unable to sync your update.";
   const code =
@@ -683,11 +669,6 @@ export async function completeHabitAction(rawInput: unknown) {
 
       if (state.completions.some((completion) => completion.habitId === input.habitId && completion.day === input.day)) {
         throw new Error("This habit is already checked for that day.");
-      }
-
-      const weekCount = countHabitWeekCompletions(state, input.habitId, input.day);
-      if (weekCount >= habit.targetPerWeek) {
-        throw new Error(`You already reached this habit's weekly goal of ${habit.targetPerWeek}.`);
       }
 
       state.completions.push({ habitId: input.habitId, day: input.day });

@@ -5,7 +5,6 @@ import Image from "next/image";
 import {
   addDays,
   addMonths,
-  endOfWeek,
   format,
   isAfter,
   isBefore,
@@ -97,23 +96,6 @@ function colorForPriority(priority: HabitPriority) {
   if (priority === HabitPriority.HIGH) return "#ff0000";
   if (priority === HabitPriority.MEDIUM) return "#f59e0b";
   return "#d9d900";
-}
-
-function countHabitWeekCompletions(
-  completions: HabitRabbitState["completions"],
-  habitId: string,
-  anchorDay: string
-) {
-  const date = new Date(`${anchorDay}T00:00:00.000Z`);
-  const weekStart = toIsoDay(startOfWeek(date, { weekStartsOn: 0 }));
-  const weekEnd = toIsoDay(endOfWeek(date, { weekStartsOn: 0 }));
-
-  return completions.filter(
-    (completion) =>
-      completion.habitId === habitId &&
-      completion.day >= weekStart &&
-      completion.day <= weekEnd
-  ).length;
 }
 
 export function HabitRabbitApp({ state }: HabitRabbitAppProps) {
@@ -352,12 +334,6 @@ export function HabitRabbitApp({ state }: HabitRabbitAppProps) {
     const habit = liveStateRef.current.habits.find((entry) => entry.id === habitId);
     if (!habit) {
       setFlash("Habit not found.");
-      return;
-    }
-
-    const weekCount = countHabitWeekCompletions(liveStateRef.current.completions, habitId, day);
-    if (weekCount >= habit.targetPerWeek) {
-      setFlash(`You already reached this habit's weekly goal of ${habit.targetPerWeek}.`);
       return;
     }
 
@@ -1251,8 +1227,7 @@ function HabitScreen({
                   const disabled =
                     isBefore(date, oneWeekAgo) ||
                     isAfter(date, today) ||
-                    checked ||
-                    weekDone >= habit.targetPerWeek;
+                    checked;
                   return (
                     <button
                       key={day}
